@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i class="fa-solid fa-graduation-cap"></i> School Dashboard
+        </div>
+        <div class="nav-controls">
+            <select id="userClassSelect" class="nav-select">
+                <option value="" disabled selected>クラス選択</option>
+                </select>
+            <button id="btnHome" class="nav-btn active"><i class="fa-solid fa-house"></i></button>
+            <button id="btnSettings" class="nav-btn"><i class="fa-solid fa-gear"></i></button>
+            <button id="btnAdmin" class="nav-btn admin-color"><i class="fa-solid fa-shield-halved"></i> 管理者</button>
+        </div>
+    </nav>
+
+    <main id="app">
+        
+        <section id="page-home" class="page active">
+            <div class="dashboard-grid">
+                
+                <div class="card time-card full-width">
+                    <div class="card-header">
+                        <span class="icon-box bg-purple"><i class="fa-regular fa-clock"></i></span>
+                        <h2>現在時刻</h2>
+                    </div>
+                    <div class="clock-display">
+                        <div id="currentTime">00:00:00</div>
+                        <div id="currentDate" class="date-sub">2026年1月20日 (火)</div>
+                    </div>
+                </div>
+
+                <div class="card next-class-card full-width">
+                    <div class="card-header">
+                        <span class="icon-box bg-green"><i class="fa-solid fa-book-open"></i></span>
+                        <h2>次の授業</h2>
+                    </div>
+                    <div class="next-class-content">
+                        <h3 id="nextSubject">読み込み中...</h3>
+                        <div class="next-class-meta">
+                            <span id="nextPeriodBadge" class="badge">--限</span>
+                            <span id="timeUntilNext" class="time-remaining">--分後</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card schedule-card">
+                    <div class="card-header">
+                        <span class="icon-box bg-blue"><i class="fa-regular fa-calendar-days"></i></span>
+                        <h2>今日の時間割</h2>
+                        <span id="scheduleDay" class="header-sub">火曜日</span>
+                    </div>
+                    <ul id="dailyScheduleList" class="schedule-list">
+                        </ul>
+                </div>
+
+                <div class="card test-card">
+                    <div class="card-header">
+                        <span class="icon-box bg-orange"><i class="fa-solid fa-flag-checkered"></i></span>
+                        <h2>次のテストまで</h2>
+                    </div>
+                    <div id="testCountdownContainer" class="countdown-container">
+                        <div class="test-name" id="targetTestName">テスト予定なし</div>
+                        <div class="timer-digits" id="testTimer">
+                            <div><span id="cdDays">0</span><small>日</small></div>
+                            <div><span id="cdHours">0</span><small>時間</small></div>
+                            <div><span id="cdMins">0</span><small>分</small></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card todo-card">
+                    <div class="card-header">
+                        <span class="icon-box bg-yellow"><i class="fa-solid fa-list-check"></i></span>
+                        <h2>ToDoリスト</h2>
+                        <span id="todoCount" class="header-sub">0/0 完了</span>
+                    </div>
+                    <div class="todo-input-area">
+                        <input type="text" id="newTodoInput" placeholder="新しいタスクを追加...">
+                        <button id="addTodoBtn"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div class="progress-bar-bg"><div id="todoProgress" class="progress-bar-fill" style="width: 0%"></div></div>
+                    <ul id="todoList" class="todo-list">
+                        </ul>
+                </div>
+
+                <div class="card pomodoro-card">
+                    <div class="card-header">
+                        <span class="icon-box bg-red"><i class="fa-solid fa-stopwatch"></i></span>
+                        <h2>ポモドーロ</h2>
+                    </div>
+                    <div class="pomodoro-display">
+                        <div id="pomoTimer">25:00</div>
+                        <div class="pomo-status">25分集中</div>
+                    </div>
+                    <div class="pomo-controls">
+                        <button id="pomoStartBtn" class="btn-primary">開始</button>
+                        <button id="pomoResetBtn" class="btn-secondary"><i class="fa-solid fa-rotate-right"></i></button>
+                    </div>
+                </div>
+
+                <div class="card calendar-card">
+                    <div class="card-header">
+                        <span class="icon-box bg-indigo"><i class="fa-regular fa-calendar"></i></span>
+                        <h2>個人スケジュール</h2>
+                    </div>
+                    <div id="calendarPreview" class="calendar-preview">
+                        <div class="calendar-placeholder">
+                            <p>設定画面でiCal URLを登録すると<br>ここに予定が表示されます(模擬)</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+
+        <section id="page-settings" class="page">
+            <div class="settings-container">
+                <h1><span class="icon-box bg-purple"><i class="fa-solid fa-user-gear"></i></span> 個人設定</h1>
+                
+                <div class="card settings-card">
+                    <h3>クラス選択</h3>
+                    <p>所属クラスを選択してください。</p>
+                    <select id="settingClassSelect" class="full-select">
+                        </select>
+                </div>
+
+                <div class="card settings-card">
+                    <h3>Googleカレンダー連携</h3>
+                    <p>iCal形式の非公開URLを入力してください。</p>
+                    <input type="text" id="icalUrlInput" class="full-input" placeholder="https://calendar.google.com/...">
+                    <div class="help-text">
+                        <small>取得方法: Googleカレンダー設定 > マイカレンダーの設定 > カレンダーの統合 > iCal形式の非公開URL</small>
+                    </div>
+                </div>
+
+                <button id="saveSettingsBtn" class="btn-primary full-btn">設定を保存</button>
+            </div>
+        </section>
+
+
+        <section id="page-admin-login" class="page">
+            <div class="login-container">
+                <div class="card login-card">
+                    <div class="login-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                    <h2>管理者認証</h2>
+                    <p>管理者パスワードを入力してください</p>
+                    <input type="password" id="adminPasswordInput" placeholder="パスワード (1234)">
+                    <button id="adminLoginBtn" class="btn-primary full-btn">ログイン</button>
+                    <p id="loginError" class="error-msg" style="display:none;">パスワードが違います</p>
+                </div>
+            </div>
+        </section>
+
+
+        <section id="page-admin-dashboard" class="page">
+            <div class="admin-header">
+                <h1>管理者設定</h1>
+                <p>学校全体の設定を管理します（変更内容はJSONとして出力されます）</p>
+            </div>
+
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="tab-timings">時限設定</button>
+                <button class="tab-btn" data-tab="tab-schedule">時間割</button>
+                <button class="tab-btn" data-tab="tab-tests">テスト日程</button>
+            </div>
+
+            <div id="tab-timings" class="tab-content active">
+                <div class="card">
+                    <h3>時限開始・終了時刻設定</h3>
+                    <div id="timingsEditor">
+                        </div>
+                </div>
+            </div>
+
+            <div id="tab-schedule" class="tab-content">
+                <div class="card">
+                    <h3>クラス別時間割設定</h3>
+                    <div class="filters">
+                        <select id="adminClassSelect" class="half-select"></select>
+                        <select id="adminDaySelect" class="half-select">
+                            <option value="Mon">月曜日</option>
+                            <option value="Tue">火曜日</option>
+                            <option value="Wed">水曜日</option>
+                            <option value="Thu">木曜日</option>
+                            <option value="Fri">金曜日</option>
+                        </select>
+                    </div>
+                    <div id="scheduleEditor">
+                        </div>
+                </div>
+            </div>
+
+            <div id="tab-tests" class="tab-content">
+                <div class="card">
+                    <h3>テスト日程設定</h3>
+                    <div class="add-test-form">
+                        <input type="text" id="newTestName" placeholder="テスト名 (例: 中間テスト)">
+                        <input type="date" id="newTestDate">
+                        <button id="addTestBtn" class="btn-secondary">追加</button>
+                    </div>
+                    <ul id="adminTestList" class="admin-list">
+                        </ul>
+                </div>
+            </div>
+
+            <div class="admin-save-area">
+                <button id="downloadJsonBtn" class="btn-primary full-btn">
+                    <i class="fa-solid fa-download"></i> 設定データを書き出し (Save)
+                </button>
+                <p class="save-note">※ GitHub Pagesのため、直接保存できません。ダウンロードされた `data.json` をGitHubリポジトリにアップロードしてください。</p>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
