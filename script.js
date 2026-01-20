@@ -1,527 +1,522 @@
 /* =========================================
-   Global State & Constants
+   Global Configuration & State
    ========================================= */
-const REPO_DATA_URL = './data.json'; // 実運用時はGitHub上のRaw URL等を指定
+const DATA_URL = './data.json';
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_JP = ['日', '月', '火', '水', '木', '金', '土'];
 
 let adminData = {
-    // デフォルト（読み込み失敗時用）
-    timeSettings: [],
+    // 読み込み失敗時のフォールバックデータ
+    timeSettings: Array(7).fill({start: "00:00", end: "00:00"}),
     timetables: {},
     tests: []
 };
 
-let userSettings = {
-    classId: localStorage.getItem('userClass') || '21HR',
-    icalUrl: localStorage.getItem('userIcal') || '',
+// ユーザー設定 (LocalStorage)
+let userConfig = {
+    classId: localStorage.getItem('userClassId') || '21HR',
+    icalUrl: localStorage.getItem('userIcalUrl') || '',
     todos: JSON.parse(localStorage.getItem('userTodos')) || []
 };
 
 // Pomodoro State
-let pomoInterval = null;
-let pomoTime = 25 * 60;
-let isPomoRunning = false;
+let pomoTimerId = null;
+let pomoTimeRemaining = 25 * 60;
+let isPomoActive = false;
 
 /* =========================================
-   Initialization
+   Initialization (DOM Ready)
    ========================================= */
 document.addEventListener('DOMContentLoaded', async () => {
-    // 1. Load Admin Data
+    // 1. 管理者データのロード
     try {
-        const res = await fetch(REPO_DATA_URL);
-        if(res.ok) adminData = await res.json();
+        const res = await fetch(DATA_URL);
+        if (res.ok) adminData = await res.json();
     } catch (e) {
-        console.error('Data load failed, using empty default', e);
+        console.error("Data Load Error:", e);
     }
 
-    // 2. Init UI Components
+    // 2. コンポーネント初期化
     initNavigation();
-    initClock();
-    renderDashboard();
-    initTodo();
+    initClock(); // 時計と挨拶
+    initDashboard(); // 時間割・授業表示
+    initTodos();
     initPomodoro();
-    
-    // Admin Init
-    initAdmin();
-    
-    // Initial Render
-    updateUI();
+    initAdmin(); // 管理者機能
+
+    // 3. 初回描画
+    updateDashboardUI();
 });
 
 /* =========================================
-   Navigation & Routing
+   Core Logic: Navigation & UI Switching
    ========================================= */
 function initNavigation() {
-    const navs = {
-        'btnHome': 'page-home',
-        'btnSettings': 'page-settings',
-        'btnAdmin': 'page-admin-login' // Default to login
+    // ページ遷移関数
+    const switchPage = (pageId) => {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        
+        const target = document.getElementById(pageId);
+        if(target) target.classList.add('active');
+
+        // ナビボタンのアクティブ化
+        if(pageId === 'page-home') document.getElementById('btnHome').classList.add('active');
+        if(pageId === 'page-settings') document.getElementById('btnSettings').classList.add('active');
     };
 
-    // Class Select in Nav
-    const classSelect = document.getElementById('userClassSelect');
-    generateClassOptions(classSelect);
-    classSelect.value = userSettings.classId;
-    classSelect.addEventListener('change', (e) => {
-        userSettings.classId = e.target.value;
-        localStorage.setItem('userClass', userSettings.classId);
-        updateUI();
+    // イベント設定
+    document.getElementById('btnHome').addEventListener('click', () => switchPage('page-home'));
+    
+    document.getElementById('btnSettings').addEventListener('click', () => {
+        // 設定画面を開くときに現在の値をセット
+        renderSettingsForm();
+        switchPage('page-settings');
     });
 
-    // Page Switching
-    Object.keys(navs).forEach(btnId => {
-        document.getElementById(btnId).addEventListener('click', () => {
-            // Remove active from all btns
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(btnId).classList.add('active');
-
-            // Hide all pages
-            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            
-            // Show target
-            let targetId = navs[btnId];
-            if (btnId === 'btnAdmin' && isAdminLoggedIn) {
-                targetId = 'page-admin-dashboard';
-            }
-            document.getElementById(targetId).classList.add('active');
-        });
+    document.getElementById('btnAdmin').addEventListener('click', () => {
+        switchPage('page-admin-login');
     });
 
-    // Settings Page Logic
-    const settingSelect = document.getElementById('settingClassSelect');
-    generateClassOptions(settingSelect);
-    settingSelect.value = userSettings.classId;
-    document.getElementById('icalUrlInput').value = userSettings.icalUrl;
-
-    document.getElementById('saveSettingsBtn').addEventListener('click', () => {
-        userSettings.classId = settingSelect.value;
-        userSettings.icalUrl = document.getElementById('icalUrlInput').value;
-        localStorage.setItem('userClass', userSettings.classId);
-        localStorage.setItem('userIcal', userSettings.icalUrl);
-        classSelect.value = userSettings.classId; // Sync Nav
-        alert('設定を保存しました');
-        updateUI();
+    document.getElementById('adminBackBtn').addEventListener('click', () => {
+        switchPage('page-home'); // ログアウト扱いでホームへ
     });
-}
-
-function generateClassOptions(selectElement) {
-    selectElement.innerHTML = '';
-    for(let i=21; i<=28; i++) {
-        const opt = document.createElement('option');
-        opt.value = `${i}HR`;
-        opt.textContent = `${i}HR`;
-        selectElement.appendChild(opt);
-    }
 }
 
 /* =========================================
-   Dashboard Logic
+   Feature: Clock & Dynamic Greeting
    ========================================= */
 function initClock() {
-    const updateTime = () => {
+    const update = () => {
         const now = new Date();
+        
+        // 時計表示
         document.getElementById('currentTime').textContent = now.toLocaleTimeString('ja-JP', {hour12:false});
         document.getElementById('currentDate').textContent = 
             `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 (${DAYS_JP[now.getDay()]})`;
+
+        // 動的メッセージ (ここを追加)
+        const hour = now.getHours();
+        let greeting = "今日も頑張りましょう！";
+        if(hour >= 5 && hour < 11) greeting = "おはようございます！今日も1日頑張りましょう。";
+        else if(hour >= 11 && hour < 18) greeting = "こんにちは！午後の授業も集中しましょう。";
+        else if(hour >= 18) greeting = "こんばんは！明日の準備はできましたか？";
         
-        checkPeriod(now);
+        document.getElementById('dynamicGreeting').textContent = greeting;
+
+        // 定期的に授業状態をチェック
+        checkCurrentClass(now);
     };
-    setInterval(updateTime, 1000);
-    updateTime();
+    setInterval(update, 1000);
+    update();
 }
 
-function checkPeriod(now) {
-    // Current time in minutes from midnight
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-    const todayStr = DAYS[now.getDay()];
+/* =========================================
+   Feature: Dashboard Main (Class, Schedule)
+   ========================================= */
+function updateDashboardUI() {
+    // ヘッダーのクラス表示
+    document.getElementById('headerClassDisplay').textContent = userConfig.classId;
+    
+    // スケジュール描画
+    renderDailySchedule();
+    // テストカウントダウン
+    renderTestCountdown();
+    // カレンダー
+    renderCalendar();
+}
 
-    // Reset UI
-    let statusText = "授業外";
-    let nextText = "本日は終了、または授業がありません";
+function checkCurrentClass(now) {
+    const minsNow = now.getHours() * 60 + now.getMinutes();
+    const dayKey = DAYS[now.getDay()];
+    const todaySchedule = adminData.timetables[userConfig.classId]?.[dayKey] || {};
+
+    let nextSubject = "本日の授業終了";
     let badgeText = "--";
-    let timeDiff = "";
-
-    // Get Schedule for today
-    const classId = userSettings.classId;
-    const daySchedule = adminData.timetables[classId]?.[todayStr] || {};
-
-    if (Object.keys(daySchedule).length === 0) {
-        document.getElementById('nextSubject').textContent = "本日は授業がありません";
-        return;
-    }
-
-    // Find next class
+    let timeText = "";
     let foundNext = false;
-    for (let i = 0; i < adminData.timeSettings.length; i++) {
-        const period = adminData.timeSettings[i];
-        const pStart = timeToMins(period.start);
-        const pEnd = timeToMins(period.end);
-        const periodNum = i + 1;
-        const subject = daySchedule[periodNum] || "空き";
 
-        if (currentMins < pStart) {
-            // Before this period
-            nextText = subject;
-            badgeText = `${periodNum}限`;
-            timeDiff = `${pStart - currentMins}分後`;
+    // 現在の時限判定
+    adminData.timeSettings.forEach((period, idx) => {
+        if(foundNext) return;
+
+        const pNum = idx + 1;
+        const [sh, sm] = period.start.split(':').map(Number);
+        const [eh, em] = period.end.split(':').map(Number);
+        const sMins = sh * 60 + sm;
+        const eMins = eh * 60 + em;
+
+        const subject = todaySchedule[pNum] || "空き";
+
+        if (minsNow < sMins) {
+            // これから始まる
+            nextSubject = subject;
+            badgeText = `${pNum}限`;
+            timeText = `${sMins - minsNow}分後`;
             foundNext = true;
-            break;
-        } else if (currentMins >= pStart && currentMins <= pEnd) {
-            // During this period
-            nextText = `現在: ${subject}`;
-            badgeText = `${periodNum}限中`;
-            timeDiff = `残り${pEnd - currentMins}分`;
+        } else if (minsNow >= sMins && minsNow <= eMins) {
+            // 授業中
+            nextSubject = subject;
+            badgeText = `${pNum}限 授業中`;
+            timeText = `残り${eMins - minsNow}分`;
             foundNext = true;
-            break;
         }
+    });
+
+    if(!foundNext && Object.keys(todaySchedule).length === 0) {
+         nextSubject = "休日";
+         timeText = "";
     }
 
-    if (!foundNext) {
-        nextText = "本日の授業は全て終了しました";
-    }
-
-    document.getElementById('nextSubject').textContent = nextText;
+    document.getElementById('nextSubject').textContent = nextSubject;
     document.getElementById('nextPeriodBadge').textContent = badgeText;
-    document.getElementById('timeUntilNext').textContent = timeDiff;
+    document.getElementById('timeUntilNext').textContent = timeText;
 }
 
-function updateUI() {
-    renderSchedule();
-    renderCountdown();
-    renderCalendarStub();
-}
-
-function renderSchedule() {
+function renderDailySchedule() {
     const list = document.getElementById('dailyScheduleList');
     list.innerHTML = '';
-    const now = new Date();
-    const todayStr = DAYS[now.getDay()];
-    const classId = userSettings.classId;
     
+    const now = new Date();
+    const dayKey = DAYS[now.getDay()];
+    const minsNow = now.getHours() * 60 + now.getMinutes();
+
     document.getElementById('scheduleDay').textContent = `${DAYS_JP[now.getDay()]}曜日`;
+    const todaySchedule = adminData.timetables[userConfig.classId]?.[dayKey] || {};
 
-    const daySchedule = adminData.timetables[classId]?.[todayStr] || {};
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-
-    adminData.timeSettings.forEach((setting, idx) => {
+    adminData.timeSettings.forEach((period, idx) => {
         const pNum = idx + 1;
-        const li = document.createElement('li');
-        const subject = daySchedule[pNum] || "-";
+        const subject = todaySchedule[pNum] || "-";
         
-        // Highlight logic
-        const pStart = timeToMins(setting.start);
-        const pEnd = timeToMins(setting.end);
-        if (currentMins >= pStart && currentMins <= pEnd) li.classList.add('current');
+        const li = document.createElement('li');
+        
+        // ハイライト判定
+        const [sh, sm] = period.start.split(':').map(Number);
+        const [eh, em] = period.end.split(':').map(Number);
+        const sMins = sh * 60 + sm;
+        const eMins = eh * 60 + em;
+        
+        if(minsNow >= sMins && minsNow <= eMins) {
+            li.classList.add('active');
+        }
 
         li.innerHTML = `
-            <span><span class="badge" style="margin-right:8px;">${pNum}</span> ${subject}</span>
-            <span style="color:var(--text-sub); font-size:0.8rem;">${setting.start} - ${setting.end}</span>
+            <div><span style="font-weight:bold; margin-right:10px;">${pNum}</span> ${subject}</div>
+            <div style="font-size:0.8rem; opacity:0.7;">${period.start} - ${period.end}</div>
         `;
         list.appendChild(li);
     });
 }
 
-function renderCountdown() {
-    const container = document.getElementById('testCountdownContainer');
-    // Find next test
+function renderTestCountdown() {
     const now = new Date();
-    const nextTest = adminData.tests
+    // 未来のテストを探す
+    const upcoming = adminData.tests
         .map(t => ({...t, dateObj: new Date(t.date)}))
-        .filter(t => t.dateObj > now)
+        .filter(t => t.dateObj.setHours(23,59,59) >= now.getTime())
         .sort((a,b) => a.dateObj - b.dateObj)[0];
 
-    if (!nextTest) {
-        document.getElementById('targetTestName').textContent = "予定されているテストはありません";
-        document.getElementById('testTimer').style.display = 'none';
-        return;
+    const container = document.getElementById('testContainer');
+    if (upcoming) {
+        document.getElementById('targetTestName').textContent = upcoming.name;
+        const diff = upcoming.dateObj - now;
+        const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+        document.getElementById('cdDays').textContent = days;
+        container.parentElement.style.background = 'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)';
+    } else {
+        document.getElementById('targetTestName').textContent = "予定されたテストはありません";
+        document.getElementById('cdDays').textContent = "--";
+        container.parentElement.style.background = '#ccc'; // グレーアウト
     }
-
-    document.getElementById('testTimer').style.display = 'flex';
-    document.getElementById('targetTestName').textContent = nextTest.name;
-    
-    const diff = nextTest.dateObj - now;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-    document.getElementById('cdDays').textContent = days;
-    document.getElementById('cdHours').textContent = hours;
-    document.getElementById('cdMins').textContent = mins;
 }
 
 /* =========================================
-   ToDo List
+   Feature: Settings (Class & ICal)
    ========================================= */
-function initTodo() {
-    const input = document.getElementById('newTodoInput');
-    const btn = document.getElementById('addTodoBtn');
+function renderSettingsForm() {
+    // クラス選択肢生成
+    const select = document.getElementById('settingClassSelect');
+    select.innerHTML = '';
+    for(let i=21; i<=28; i++) {
+        const hr = `${i}HR`;
+        const opt = document.createElement('option');
+        opt.value = hr;
+        opt.textContent = hr;
+        if(hr === userConfig.classId) opt.selected = true;
+        select.appendChild(opt);
+    }
+    // iCal入力
+    document.getElementById('icalUrlInput').value = userConfig.icalUrl;
+}
 
-    btn.addEventListener('click', () => {
+// 設定保存ボタン
+document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+    const newClass = document.getElementById('settingClassSelect').value;
+    const newIcal = document.getElementById('icalUrlInput').value;
+
+    userConfig.classId = newClass;
+    userConfig.icalUrl = newIcal;
+
+    localStorage.setItem('userClassId', newClass);
+    localStorage.setItem('userIcalUrl', newIcal);
+
+    alert('設定を保存しました');
+    updateDashboardUI(); // 画面更新
+});
+
+function renderCalendar() {
+    const container = document.getElementById('calendarContent');
+    if(userConfig.icalUrl) {
+        // デモ用: 実際はGoogle Calendar Embed URLに変換するか、リンクを表示する
+        // ここでは簡易的にリンクボタンを表示
+        container.innerHTML = `
+            <div>
+                <i class="fa-solid fa-check-circle" style="color:#38B2AC; font-size:2rem; margin-bottom:10px;"></i>
+                <p>連携済み</p>
+                <a href="${userConfig.icalUrl}" target="_blank" style="color:#5B4DFF; display:block; margin-top:10px;">カレンダーを開く</a>
+            </div>
+        `;
+    } else {
+        container.innerHTML = `<p class="placeholder-text">設定画面でiCal URLを登録してください</p>`;
+    }
+}
+
+/* =========================================
+   Feature: ToDo List
+   ========================================= */
+function initTodos() {
+    renderTodoList();
+
+    document.getElementById('addTodoBtn').addEventListener('click', () => {
+        const input = document.getElementById('newTodoInput');
         if(input.value.trim()) {
-            userSettings.todos.push({ text: input.value, done: false });
+            userConfig.todos.push({ text: input.value, done: false });
             saveTodos();
             input.value = '';
         }
     });
-
-    renderTodos();
 }
 
-function saveTodos() {
-    localStorage.setItem('userTodos', JSON.stringify(userSettings.todos));
-    renderTodos();
-}
-
-function renderTodos() {
+function renderTodoList() {
     const list = document.getElementById('todoList');
     list.innerHTML = '';
+    
     let doneCount = 0;
-
-    userSettings.todos.forEach((todo, idx) => {
+    userConfig.todos.forEach((todo, index) => {
         if(todo.done) doneCount++;
         const li = document.createElement('li');
         li.className = todo.done ? 'done' : '';
         li.innerHTML = `
-            <input type="checkbox" ${todo.done ? 'checked' : ''}>
-            <span>${todo.text}</span>
-            <button style="margin-left:auto; background:none; border:none; color:#aaa; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <input type="checkbox" ${todo.done ? 'checked' : ''}>
+                <span>${todo.text}</span>
+            </div>
+            <button class="delete-btn" style="border:none; background:none; color:#aaa; cursor:pointer;"><i class="fa-solid fa-trash"></i></button>
         `;
         
-        // Checkbox event
+        // チェックイベント
         li.querySelector('input').addEventListener('change', () => {
-            userSettings.todos[idx].done = !userSettings.todos[idx].done;
+            userConfig.todos[index].done = !userConfig.todos[index].done;
             saveTodos();
         });
-
-        // Delete event
-        li.querySelector('button').addEventListener('click', () => {
-            userSettings.todos.splice(idx, 1);
+        // 削除イベント
+        li.querySelector('.delete-btn').addEventListener('click', () => {
+            userConfig.todos.splice(index, 1);
             saveTodos();
         });
 
         list.appendChild(li);
     });
 
-    // Progress
-    const total = userSettings.todos.length;
-    document.getElementById('todoCount').textContent = `${doneCount}/${total} 完了`;
-    const pct = total === 0 ? 0 : (doneCount / total) * 100;
-    document.getElementById('todoProgress').style.width = `${pct}%`;
+    const total = userConfig.todos.length;
+    document.getElementById('todoCount').textContent = `${doneCount}/${total}`;
+    const percent = total > 0 ? (doneCount / total) * 100 : 0;
+    document.getElementById('todoProgress').style.width = `${percent}%`;
+}
+
+function saveTodos() {
+    localStorage.setItem('userTodos', JSON.stringify(userConfig.todos));
+    renderTodoList();
 }
 
 /* =========================================
-   Pomodoro
+   Feature: Pomodoro
    ========================================= */
 function initPomodoro() {
-    const timerDisplay = document.getElementById('pomoTimer');
-    const startBtn = document.getElementById('pomoStartBtn');
-    const resetBtn = document.getElementById('pomoResetBtn');
+    const display = document.getElementById('pomoTimer');
+    const btn = document.getElementById('pomoStartBtn');
 
-    const formatTime = (s) => {
-        const m = Math.floor(s / 60).toString().padStart(2, '0');
-        const sec = (s % 60).toString().padStart(2, '0');
-        return `${m}:${sec}`;
+    const format = (s) => {
+        const m = Math.floor(s / 60).toString().padStart(2,'0');
+        const sc = (s % 60).toString().padStart(2,'0');
+        return `${m}:${sc}`;
     };
 
-    startBtn.addEventListener('click', () => {
-        if (isPomoRunning) {
-            clearInterval(pomoInterval);
-            startBtn.textContent = '再開';
-            isPomoRunning = false;
+    btn.addEventListener('click', () => {
+        if(isPomoActive) {
+            // Stop
+            clearInterval(pomoTimerId);
+            isPomoActive = false;
+            btn.textContent = "開始";
         } else {
-            startBtn.textContent = '一時停止';
-            isPomoRunning = true;
-            pomoInterval = setInterval(() => {
-                if (pomoTime > 0) {
-                    pomoTime--;
-                    timerDisplay.textContent = formatTime(pomoTime);
+            // Start
+            isPomoActive = true;
+            btn.textContent = "一時停止";
+            pomoTimerId = setInterval(() => {
+                if(pomoTimeRemaining > 0) {
+                    pomoTimeRemaining--;
+                    display.textContent = format(pomoTimeRemaining);
                 } else {
-                    clearInterval(pomoInterval);
-                    alert('ポモドーロ終了！休憩しましょう。');
-                    isPomoRunning = false;
-                    startBtn.textContent = '開始';
+                    clearInterval(pomoTimerId);
+                    alert("お疲れ様でした！休憩しましょう。");
+                    isPomoActive = false;
+                    btn.textContent = "開始";
+                    pomoTimeRemaining = 25 * 60;
                 }
             }, 1000);
         }
     });
 
-    resetBtn.addEventListener('click', () => {
-        clearInterval(pomoInterval);
-        pomoTime = 25 * 60;
-        timerDisplay.textContent = "25:00";
-        startBtn.textContent = '開始';
-        isPomoRunning = false;
+    document.getElementById('pomoResetBtn').addEventListener('click', () => {
+        clearInterval(pomoTimerId);
+        isPomoActive = false;
+        pomoTimeRemaining = 25 * 60;
+        display.textContent = "25:00";
+        btn.textContent = "開始";
     });
 }
 
 /* =========================================
-   Admin Logic
+   Feature: Admin Panel
    ========================================= */
-let isAdminLoggedIn = false;
+function initDashboard() {} // 空定義（上のupdateUIで処理するため）
 
 function initAdmin() {
-    // Login
+    // ログイン処理
     document.getElementById('adminLoginBtn').addEventListener('click', () => {
         const pass = document.getElementById('adminPasswordInput').value;
-        if (pass === '1234') {
-            isAdminLoggedIn = true;
+        if(pass === '1234') {
             document.getElementById('page-admin-login').classList.remove('active');
             document.getElementById('page-admin-dashboard').classList.add('active');
-            renderAdminDashboard();
+            renderAdminUI();
         } else {
             document.getElementById('loginError').style.display = 'block';
         }
     });
 
-    // Tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById(btn.dataset.tab).classList.add('active');
+    // タブ切り替え
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.target).classList.add('active');
         });
     });
 
-    // Class/Day Selectors for Schedule Edit
-    const adminClassSelect = document.getElementById('adminClassSelect');
-    generateClassOptions(adminClassSelect);
-    
-    // Add Event Listeners for Dynamic Form Generation
-    adminClassSelect.addEventListener('change', renderAdminScheduleEditor);
-    document.getElementById('adminDaySelect').addEventListener('change', renderAdminScheduleEditor);
-
-    // Save/Download
+    // 変更監視（JSONダウンロード用）
     document.getElementById('downloadJsonBtn').addEventListener('click', () => {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(adminData, null, 2));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        downloadAnchorNode.setAttribute("download", "data.json");
-        document.body.appendChild(downloadAnchorNode); // required for firefox
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
+        const jsonStr = JSON.stringify(adminData, null, 2);
+        const blob = new Blob([jsonStr], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "data.json";
+        a.click();
+        URL.revokeObjectURL(url);
     });
-    
-    // Test Add
+
+    // 各種エディタの初期化
+    const classSel = document.getElementById('adminClassSelect');
+    // 21HR-28HR
+    for(let i=21; i<=28; i++) {
+        const opt = document.createElement('option');
+        opt.value = `${i}HR`;
+        opt.textContent = `${i}HR`;
+        classSel.appendChild(opt);
+    }
+    classSel.addEventListener('change', renderScheduleEditor);
+    document.getElementById('adminDaySelect').addEventListener('change', renderScheduleEditor);
+
+    // テスト追加
     document.getElementById('addTestBtn').addEventListener('click', () => {
         const name = document.getElementById('newTestName').value;
         const date = document.getElementById('newTestDate').value;
         if(name && date) {
             adminData.tests.push({name, date});
-            renderAdminTests();
+            renderTestList();
             document.getElementById('newTestName').value = '';
         }
     });
 }
 
-function renderAdminDashboard() {
-    renderAdminTimings();
-    renderAdminScheduleEditor();
-    renderAdminTests();
+function renderAdminUI() {
+    renderTimingsEditor();
+    renderScheduleEditor();
+    renderTestList();
 }
 
-function renderAdminTimings() {
+function renderTimingsEditor() {
     const container = document.getElementById('timingsEditor');
     container.innerHTML = '';
-    // Ensure 7 periods
-    if (adminData.timeSettings.length < 7) {
-        for(let i=0; i<7; i++) adminData.timeSettings[i] = {start: "00:00", end: "00:00"};
-    }
-
-    adminData.timeSettings.forEach((setting, idx) => {
+    adminData.timeSettings.forEach((ts, idx) => {
         const div = document.createElement('div');
         div.className = 'schedule-row';
         div.innerHTML = `
             <label>${idx+1}限</label>
-            <input type="time" value="${setting.start}" data-idx="${idx}" data-key="start">
+            <input type="time" class="input-field" value="${ts.start}" onchange="updateTiming(${idx}, 'start', this.value)">
             <span>~</span>
-            <input type="time" value="${setting.end}" data-idx="${idx}" data-key="end">
+            <input type="time" class="input-field" value="${ts.end}" onchange="updateTiming(${idx}, 'end', this.value)">
         `;
-        // Live binding
-        div.querySelectorAll('input').forEach(input => {
-            input.addEventListener('change', (e) => {
-                adminData.timeSettings[e.target.dataset.idx][e.target.dataset.key] = e.target.value;
-            });
-        });
         container.appendChild(div);
     });
 }
+// グローバルスコープに露出させてHTMLのonchangeから呼べるようにする
+window.updateTiming = (idx, key, val) => {
+    adminData.timeSettings[idx][key] = val;
+};
 
-function renderAdminScheduleEditor() {
+function renderScheduleEditor() {
     const container = document.getElementById('scheduleEditor');
-    const classId = document.getElementById('adminClassSelect').value || '21HR';
-    const day = document.getElementById('adminDaySelect').value;
-
     container.innerHTML = '';
     
-    // Init path if undefined
-    if (!adminData.timetables[classId]) adminData.timetables[classId] = {};
-    if (!adminData.timetables[classId][day]) adminData.timetables[classId][day] = {};
+    const cls = document.getElementById('adminClassSelect').value || '21HR';
+    const day = document.getElementById('adminDaySelect').value || 'Mon';
 
-    for (let i = 1; i <= 7; i++) {
+    if(!adminData.timetables[cls]) adminData.timetables[cls] = {};
+    if(!adminData.timetables[cls][day]) adminData.timetables[cls][day] = {};
+
+    for(let i=1; i<=7; i++) {
         const div = document.createElement('div');
         div.className = 'schedule-row';
-        const currentVal = adminData.timetables[classId][day][i] || "";
+        const val = adminData.timetables[cls][day][i] || "";
         div.innerHTML = `
             <label>${i}限</label>
-            <input type="text" value="${currentVal}" placeholder="科目名" data-period="${i}">
+            <input type="text" class="input-field" value="${val}" placeholder="科目名" 
+             oninput="updateSchedule('${cls}', '${day}', ${i}, this.value)">
         `;
-        div.querySelector('input').addEventListener('input', (e) => {
-            adminData.timetables[classId][day][i] = e.target.value;
-        });
         container.appendChild(div);
     }
 }
+window.updateSchedule = (cls, day, period, val) => {
+    adminData.timetables[cls][day][period] = val;
+};
 
-function renderAdminTests() {
+function renderTestList() {
     const list = document.getElementById('adminTestList');
     list.innerHTML = '';
-    adminData.tests.forEach((test, idx) => {
+    adminData.tests.forEach((t, idx) => {
         const li = document.createElement('li');
-        li.style.display = "flex";
-        li.style.justifyContent = "space-between";
-        li.style.padding = "5px";
         li.innerHTML = `
-            <span>${test.name} (${test.date})</span>
-            <button data-idx="${idx}" style="color:red; background:none; border:none; cursor:pointer;">削除</button>
+            <span>${t.name} (${t.date})</span>
+            <button onclick="deleteTest(${idx})" style="color:red; background:none; border:none; cursor:pointer;">削除</button>
         `;
-        li.querySelector('button').addEventListener('click', (e) => {
-            adminData.tests.splice(e.target.dataset.idx, 1);
-            renderAdminTests();
-        });
         list.appendChild(li);
     });
 }
-
-/* =========================================
-   Helpers
-   ========================================= */
-function timeToMins(timeStr) {
-    if(!timeStr) return 0;
-    const [h, m] = timeStr.split(':').map(Number);
-    return h * 60 + m;
-}
-
-function renderCalendarStub() {
-    // 実際の実装ではここでiCal URLをfetchしますが、
-    // CORS問題があるため、このデモではリンクかダミーを表示します。
-    // Userが入力をした場合のUI状態を反映
-    const preview = document.getElementById('calendarPreview');
-    if(userSettings.icalUrl) {
-        preview.innerHTML = `
-            <div style="text-align:center; padding:20px; color:var(--text-sub);">
-                <i class="fa-solid fa-check-circle" style="color:var(--c-green-t); font-size:2rem; margin-bottom:10px;"></i>
-                <p>Googleカレンダー連携済み</p>
-                <small style="display:block; margin-top:5px; word-break:break-all;">${userSettings.icalUrl.substring(0,30)}...</small>
-                <a href="${userSettings.icalUrl.replace('ical/', 'embed/').replace('.ics','')}" target="_blank" style="display:inline-block; margin-top:10px; color:var(--primary);">カレンダーを開く</a>
-            </div>
-        `;
-    } else {
-        preview.innerHTML = `
-            <div class="calendar-placeholder">
-                <p>設定画面でiCal URLを登録すると<br>ここに予定が表示されます</p>
-            </div>
-        `;
-    }
-}
+window.deleteTest = (idx) => {
+    adminData.tests.splice(idx, 1);
+    renderTestList();
+};
