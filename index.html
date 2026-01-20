@@ -65,17 +65,21 @@
                         </ul>
                 </div>
 
-                <div class="card test-card">
+                <div class="card todo-card">
                     <div class="card-header">
-                        <span class="icon-bg orange"><i class="fa-solid fa-flag-checkered"></i></span>
-                        <h3>次のテストまで</h3>
+                        <span class="icon-bg yellow"><i class="fa-solid fa-list-check"></i></span>
+                        <h3>ToDoリスト</h3>
+                        <span id="todoCount" class="sub-text">0/0</span>
                     </div>
-                    <div id="testContainer" class="test-body">
-                        <h4 id="targetTestName">予定なし</h4>
-                        <div class="countdown-timer">
-                            あと <span id="cdDays">0</span> 日
-                        </div>
+                    <div class="todo-input-group">
+                        <input type="text" id="newTodoInput" placeholder="新しいタスクを追加...">
+                        <button id="addTodoBtn"><i class="fa-solid fa-plus"></i></button>
                     </div>
+                    <div class="progress-container">
+                        <div id="todoProgress" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <ul id="todoList" class="todo-list-items">
+                        </ul>
                 </div>
 
                 <div class="card pomodoro-card">
@@ -93,21 +97,17 @@
                     </div>
                 </div>
 
-                <div class="card todo-card">
+                <div class="card test-card">
                     <div class="card-header">
-                        <span class="icon-bg yellow"><i class="fa-solid fa-list-check"></i></span>
-                        <h3>ToDoリスト</h3>
-                        <span id="todoCount" class="sub-text">0/0</span>
+                        <span class="icon-bg orange"><i class="fa-solid fa-flag-checkered"></i></span>
+                        <h3>次のテストまで</h3>
                     </div>
-                    <div class="todo-input-group">
-                        <input type="text" id="newTodoInput" placeholder="新しいタスクを追加...">
-                        <button id="addTodoBtn"><i class="fa-solid fa-plus"></i></button>
+                    <div id="testContainer" class="test-body">
+                        <h4 id="targetTestName">予定なし</h4>
+                        <div class="countdown-timer">
+                            あと <span id="cdDays">0</span> 日
+                        </div>
                     </div>
-                    <div class="progress-container">
-                        <div id="todoProgress" class="progress-bar" style="width: 0%"></div>
-                    </div>
-                    <ul id="todoList" class="todo-list-items">
-                        </ul>
                 </div>
 
                 <div class="card calendar-card">
