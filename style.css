@@ -80,7 +80,6 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 /* 1. 現在時刻（グラデーション） */
 .time-card {
     grid-column: span 12;
-    /* スクリーンショットのグラデーションを再現 */
     background: linear-gradient(135deg, #5B4DFF 0%, #8F94FB 100%);
     color: white; border: none;
     display: flex; flex-direction: column; justify-content: center;
@@ -111,21 +110,9 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
     padding-left: 10px; padding-right: 10px; border-radius: 8px; border-bottom: none; font-weight: bold;
 }
 
-/* 4. テストカウントダウン */
-.test-card { grid-column: span 12; background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%); color: white; border: none; }
-@media (min-width: 768px) { .test-card { grid-column: span 6; } }
-.test-card .icon-bg { background: rgba(255,255,255,0.2); color: white; }
-.countdown-timer { font-size: 1.5rem; font-weight: bold; margin-top: 5px; }
-
-/* 5. ポモドーロ & ToDo & Calendar */
-.pomodoro-card { grid-column: span 12; text-align: center; }
-@media (min-width: 768px) { .pomodoro-card { grid-column: span 4; } }
-.timer-display { font-size: 3rem; font-weight: bold; color: var(--text-red); margin: 10px 0; }
-.pomo-controls { display: flex; justify-content: center; gap: 10px; margin-top: 15px; }
-.btn-icon { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: white; cursor: pointer; }
-
+/* 4. ToDoリスト (拡大: span 4 -> span 6) */
 .todo-card { grid-column: span 12; }
-@media (min-width: 768px) { .todo-card { grid-column: span 4; } }
+@media (min-width: 768px) { .todo-card { grid-column: span 6; } }
 .todo-input-group { display: flex; gap: 5px; margin-bottom: 10px; }
 .todo-input-group input { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .progress-bar { height: 4px; background: var(--text-green); transition: 0.3s; border-radius: 2px; }
@@ -133,6 +120,20 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 .todo-list-items li { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
 .todo-list-items li.done span { text-decoration: line-through; color: var(--text-sub); }
 
+/* 5. ポモドーロ */
+.pomodoro-card { grid-column: span 12; text-align: center; }
+@media (min-width: 768px) { .pomodoro-card { grid-column: span 4; } }
+.timer-display { font-size: 3rem; font-weight: bold; color: var(--text-red); margin: 10px 0; }
+.pomo-controls { display: flex; justify-content: center; gap: 10px; margin-top: 15px; }
+.btn-icon { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: white; cursor: pointer; }
+
+/* 6. テストカウントダウン (縮小: span 6 -> span 4) */
+.test-card { grid-column: span 12; background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%); color: white; border: none; }
+@media (min-width: 768px) { .test-card { grid-column: span 4; } }
+.test-card .icon-bg { background: rgba(255,255,255,0.2); color: white; }
+.countdown-timer { font-size: 1.5rem; font-weight: bold; margin-top: 5px; }
+
+/* 7. カレンダー */
 .calendar-card { grid-column: span 12; }
 @media (min-width: 768px) { .calendar-card { grid-column: span 4; } }
 .calendar-content { height: 200px; background: var(--bg-body); border-radius: 8px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; }
