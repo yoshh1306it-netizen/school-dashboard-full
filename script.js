@@ -1,418 +1,522 @@
-document.addEventListener('DOMContentLoaded', () => {
-    
-    // --- データ管理 ---
-    let appData = {
-        timings: [],
-        schedule: {},
-        tests: []
-    };
-    
-    let userSettings = {
-        classId: '21HR',
-        icalUrl: ''
-    };
+/* =========================================
+   Global Configuration & State
+   ========================================= */
+const DATA_URL = './data.json';
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS_JP = ['日', '月', '火', '水', '木', '金', '土'];
 
-    // 初期化処理
-    loadData();
-    loadUserSettings();
-    loadTodos();
-    setupEventListeners();
-    
-    // 1秒ごとの更新
-    setInterval(() => {
-        updateClock();
-        updateNextClass();
-    }, 1000);
+let adminData = {
+    // 読み込み失敗時のフォールバックデータ
+    timeSettings: Array(7).fill({start: "00:00", end: "00:00"}),
+    timetables: {},
+    tests: []
+};
 
+// ユーザー設定 (LocalStorage)
+let userConfig = {
+    classId: localStorage.getItem('userClassId') || '21HR',
+    icalUrl: localStorage.getItem('userIcalUrl') || '',
+    todos: JSON.parse(localStorage.getItem('userTodos')) || []
+};
 
-    /* === データ取得 === */
-    async function loadData() {
-        try {
-            const response = await fetch('data.json');
-            if (!response.ok) throw new Error("JSON読み込み失敗");
-            appData = await response.json();
-            
-            initDashboard();
-            initAdmin();
-        } catch (error) {
-            console.error(error);
-            document.getElementById('dynamicGreeting').textContent = "データ読み込みエラー";
-        }
+// Pomodoro State
+let pomoTimerId = null;
+let pomoTimeRemaining = 25 * 60;
+let isPomoActive = false;
+
+/* =========================================
+   Initialization (DOM Ready)
+   ========================================= */
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. 管理者データのロード
+    try {
+        const res = await fetch(DATA_URL);
+        if (res.ok) adminData = await res.json();
+    } catch (e) {
+        console.error("Data Load Error:", e);
     }
 
-    function loadUserSettings() {
-        const saved = localStorage.getItem('userSettings');
-        if (saved) userSettings = JSON.parse(saved);
+    // 2. コンポーネント初期化
+    initNavigation();
+    initClock(); // 時計と挨拶
+    initDashboard(); // 時間割・授業表示
+    initTodos();
+    initPomodoro();
+    initAdmin(); // 管理者機能
+
+    // 3. 初回描画
+    updateDashboardUI();
+});
+
+/* =========================================
+   Core Logic: Navigation & UI Switching
+   ========================================= */
+function initNavigation() {
+    // ページ遷移関数
+    const switchPage = (pageId) => {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
         
-        // UI反映
-        document.getElementById('headerClassDisplay').textContent = userSettings.classId;
-    }
+        const target = document.getElementById(pageId);
+        if(target) target.classList.add('active');
 
-    function initDashboard() {
-        renderSchedule();
-        updateNextClass();
-        updateTestCountdown();
-        updateGreeting();
-    }
+        // ナビボタンのアクティブ化
+        if(pageId === 'page-home') document.getElementById('btnHome').classList.add('active');
+        if(pageId === 'page-settings') document.getElementById('btnSettings').classList.add('active');
+    };
 
+    // イベント設定
+    document.getElementById('btnHome').addEventListener('click', () => switchPage('page-home'));
+    
+    document.getElementById('btnSettings').addEventListener('click', () => {
+        // 設定画面を開くときに現在の値をセット
+        renderSettingsForm();
+        switchPage('page-settings');
+    });
 
-    /* === 1. 時計 & 挨拶 === */
-    function updateClock() {
+    document.getElementById('btnAdmin').addEventListener('click', () => {
+        switchPage('page-admin-login');
+    });
+
+    document.getElementById('adminBackBtn').addEventListener('click', () => {
+        switchPage('page-home'); // ログアウト扱いでホームへ
+    });
+}
+
+/* =========================================
+   Feature: Clock & Dynamic Greeting
+   ========================================= */
+function initClock() {
+    const update = () => {
         const now = new Date();
-        const timeStr = now.toLocaleTimeString('ja-JP', { hour12: false });
-        document.getElementById('currentTime').textContent = timeStr;
-
-        const dateStr = now.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
-        document.getElementById('currentDate').textContent = dateStr;
-    }
-
-    function updateGreeting() {
-        const h = new Date().getHours();
-        let msg = "今日も頑張りましょう！";
-        if (h < 10) msg = "おはようございます！";
-        else if (h > 18) msg = "お疲れ様です。";
-        document.getElementById('dynamicGreeting').textContent = msg;
-    }
-
-
-    /* === 2. 次の授業 & 3. 時間割 === */
-    function renderSchedule() {
-        const today = new Date().getDay(); // 0:Sun, 1:Mon...
-        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const dayKey = days[today];
-        const dayMap = ["日", "月", "火", "水", "木", "金", "土"];
         
-        document.getElementById('scheduleDay').textContent = dayMap[today] + "曜日";
+        // 時計表示
+        document.getElementById('currentTime').textContent = now.toLocaleTimeString('ja-JP', {hour12:false});
+        document.getElementById('currentDate').textContent = 
+            `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 (${DAYS_JP[now.getDay()]})`;
 
-        const list = document.getElementById('dailyScheduleList');
-        list.innerHTML = '';
-
-        const subjects = appData.schedule[userSettings.classId]?.[dayKey] || {};
+        // 動的メッセージ (ここを追加)
+        const hour = now.getHours();
+        let greeting = "今日も頑張りましょう！";
+        if(hour >= 5 && hour < 11) greeting = "おはようございます！今日も1日頑張りましょう。";
+        else if(hour >= 11 && hour < 18) greeting = "こんにちは！午後の授業も集中しましょう。";
+        else if(hour >= 18) greeting = "こんばんは！明日の準備はできましたか？";
         
-        // 1限〜7限を表示
-        for (let i = 1; i <= 7; i++) {
-            const subject = subjects[i] || '----';
-            const li = document.createElement('li');
-            li.innerHTML = `<span class="period">${i}</span> <span class="subj">${subject}</span>`;
-            
-            // 現在の授業ハイライト用クラス（簡易判定）
-            if (isCurrentPeriod(i)) li.classList.add('active');
-            
-            list.appendChild(li);
-        }
-    }
+        document.getElementById('dynamicGreeting').textContent = greeting;
 
-    function isCurrentPeriod(period) {
-        // 現在時刻がperiodの範囲内か判定するロジック（簡易実装）
-        // 実際はappData.timingsと比較する
-        return false; 
-    }
-
-    function updateNextClass() {
-        // 次の授業ロジック（簡略化：実際はtimingsと比較して算出）
-        // デモ用表示
-        const nextSubj = document.getElementById('nextSubject');
-        if(nextSubj.textContent === '読み込み中...') {
-           nextSubj.textContent = '計算中...';
-        }
-    }
-
-
-    /* === 4. ToDoリスト === */
-    const todoList = document.getElementById('todoList');
-    const newTodoInput = document.getElementById('newTodoInput');
-    const addTodoBtn = document.getElementById('addTodoBtn');
-    const todoProgress = document.getElementById('todoProgress');
-    const todoCount = document.getElementById('todoCount');
-
-    function loadTodos() {
-        const todos = JSON.parse(localStorage.getItem('todos')) || [];
-        renderTodos(todos);
-    }
-
-    function saveTodos(todos) {
-        localStorage.setItem('todos', JSON.stringify(todos));
-        renderTodos(todos);
-    }
-
-    function renderTodos(todos) {
-        todoList.innerHTML = '';
-        let doneCount = 0;
-
-        todos.forEach((todo, index) => {
-            const li = document.createElement('li');
-            if (todo.done) {
-                li.classList.add('done');
-                doneCount++;
-            }
-            li.innerHTML = `
-                <span onclick="toggleTodo(${index})">${todo.text}</span>
-                <button class="nav-btn" onclick="deleteTodo(${index})"><i class="fa-solid fa-trash"></i></button>
-            `;
-            todoList.appendChild(li);
-        });
-
-        // 進捗バー更新
-        const total = todos.length;
-        const percent = total === 0 ? 0 : (doneCount / total) * 100;
-        todoProgress.style.width = percent + '%';
-        todoCount.textContent = `${doneCount}/${total} 完了`;
-    }
-
-    window.toggleTodo = (index) => {
-        const todos = JSON.parse(localStorage.getItem('todos'));
-        todos[index].done = !todos[index].done;
-        saveTodos(todos);
+        // 定期的に授業状態をチェック
+        checkCurrentClass(now);
     };
+    setInterval(update, 1000);
+    update();
+}
 
-    window.deleteTodo = (index) => {
-        const todos = JSON.parse(localStorage.getItem('todos'));
-        todos.splice(index, 1);
-        saveTodos(todos);
-    };
+/* =========================================
+   Feature: Dashboard Main (Class, Schedule)
+   ========================================= */
+function updateDashboardUI() {
+    // ヘッダーのクラス表示
+    document.getElementById('headerClassDisplay').textContent = userConfig.classId;
+    
+    // スケジュール描画
+    renderDailySchedule();
+    // テストカウントダウン
+    renderTestCountdown();
+    // カレンダー
+    renderCalendar();
+}
 
-    addTodoBtn.addEventListener('click', () => {
-        const text = newTodoInput.value.trim();
-        if (text) {
-            const todos = JSON.parse(localStorage.getItem('todos')) || [];
-            todos.push({ text: text, done: false });
-            saveTodos(todos);
-            newTodoInput.value = '';
+function checkCurrentClass(now) {
+    const minsNow = now.getHours() * 60 + now.getMinutes();
+    const dayKey = DAYS[now.getDay()];
+    const todaySchedule = adminData.timetables[userConfig.classId]?.[dayKey] || {};
+
+    let nextSubject = "本日の授業終了";
+    let badgeText = "--";
+    let timeText = "";
+    let foundNext = false;
+
+    // 現在の時限判定
+    adminData.timeSettings.forEach((period, idx) => {
+        if(foundNext) return;
+
+        const pNum = idx + 1;
+        const [sh, sm] = period.start.split(':').map(Number);
+        const [eh, em] = period.end.split(':').map(Number);
+        const sMins = sh * 60 + sm;
+        const eMins = eh * 60 + em;
+
+        const subject = todaySchedule[pNum] || "空き";
+
+        if (minsNow < sMins) {
+            // これから始まる
+            nextSubject = subject;
+            badgeText = `${pNum}限`;
+            timeText = `${sMins - minsNow}分後`;
+            foundNext = true;
+        } else if (minsNow >= sMins && minsNow <= eMins) {
+            // 授業中
+            nextSubject = subject;
+            badgeText = `${pNum}限 授業中`;
+            timeText = `残り${eMins - minsNow}分`;
+            foundNext = true;
         }
     });
 
-
-    /* === 5. ポモドーロタイマー (設定機能付き・完全版) === */
-    let timerInterval;
-    let isRunning = false;
-    
-    // 設定値（初期値）
-    let workDuration = 25;
-    let breakDuration = 5;
-    
-    let timeLeft = workDuration * 60;
-    let isWorkMode = true; // true = 作業中, false = 休憩中
-
-    const timerDisplay = document.getElementById('pomoTimer');
-    const startBtn = document.getElementById('pomoStartBtn');
-    const resetBtn = document.getElementById('pomoResetBtn');
-    const statusText = document.getElementById('pomoStatus');
-
-    // 設定関連DOM
-    const settingsBtn = document.getElementById('pomoSettingsBtn');
-    const modal = document.getElementById('pomoModal');
-    const closeValBtn = document.getElementById('closePomoModal');
-    const saveSettingsBtn = document.getElementById('savePomoSettings');
-    const workInput = document.getElementById('pomoWorkInput');
-    const breakInput = document.getElementById('pomoBreakInput');
-
-    function updatePomoDisplay() {
-        const m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
-        const s = (timeLeft % 60).toString().padStart(2, '0');
-        timerDisplay.textContent = `${m}:${s}`;
+    if(!foundNext && Object.keys(todaySchedule).length === 0) {
+         nextSubject = "休日";
+         timeText = "";
     }
+
+    document.getElementById('nextSubject').textContent = nextSubject;
+    document.getElementById('nextPeriodBadge').textContent = badgeText;
+    document.getElementById('timeUntilNext').textContent = timeText;
+}
+
+function renderDailySchedule() {
+    const list = document.getElementById('dailyScheduleList');
+    list.innerHTML = '';
     
-    function updateStatusText() {
-        if(isWorkMode) {
-            statusText.textContent = `${workDuration}分集中`;
-            statusText.style.color = "var(--text-sub)";
-        } else {
-            statusText.textContent = `${breakDuration}分休憩`;
-            statusText.style.color = "var(--text-green)";
+    const now = new Date();
+    const dayKey = DAYS[now.getDay()];
+    const minsNow = now.getHours() * 60 + now.getMinutes();
+
+    document.getElementById('scheduleDay').textContent = `${DAYS_JP[now.getDay()]}曜日`;
+    const todaySchedule = adminData.timetables[userConfig.classId]?.[dayKey] || {};
+
+    adminData.timeSettings.forEach((period, idx) => {
+        const pNum = idx + 1;
+        const subject = todaySchedule[pNum] || "-";
+        
+        const li = document.createElement('li');
+        
+        // ハイライト判定
+        const [sh, sm] = period.start.split(':').map(Number);
+        const [eh, em] = period.end.split(':').map(Number);
+        const sMins = sh * 60 + sm;
+        const eMins = eh * 60 + em;
+        
+        if(minsNow >= sMins && minsNow <= eMins) {
+            li.classList.add('active');
         }
-    }
 
-    function toggleTimer() {
-        if (isRunning) {
-            clearInterval(timerInterval);
-            startBtn.textContent = '開始';
+        li.innerHTML = `
+            <div><span style="font-weight:bold; margin-right:10px;">${pNum}</span> ${subject}</div>
+            <div style="font-size:0.8rem; opacity:0.7;">${period.start} - ${period.end}</div>
+        `;
+        list.appendChild(li);
+    });
+}
+
+function renderTestCountdown() {
+    const now = new Date();
+    // 未来のテストを探す
+    const upcoming = adminData.tests
+        .map(t => ({...t, dateObj: new Date(t.date)}))
+        .filter(t => t.dateObj.setHours(23,59,59) >= now.getTime())
+        .sort((a,b) => a.dateObj - b.dateObj)[0];
+
+    const container = document.getElementById('testContainer');
+    if (upcoming) {
+        document.getElementById('targetTestName').textContent = upcoming.name;
+        const diff = upcoming.dateObj - now;
+        const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+        document.getElementById('cdDays').textContent = days;
+        container.parentElement.style.background = 'linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%)';
+    } else {
+        document.getElementById('targetTestName').textContent = "予定されたテストはありません";
+        document.getElementById('cdDays').textContent = "--";
+        container.parentElement.style.background = '#ccc'; // グレーアウト
+    }
+}
+
+/* =========================================
+   Feature: Settings (Class & ICal)
+   ========================================= */
+function renderSettingsForm() {
+    // クラス選択肢生成
+    const select = document.getElementById('settingClassSelect');
+    select.innerHTML = '';
+    for(let i=21; i<=28; i++) {
+        const hr = `${i}HR`;
+        const opt = document.createElement('option');
+        opt.value = hr;
+        opt.textContent = hr;
+        if(hr === userConfig.classId) opt.selected = true;
+        select.appendChild(opt);
+    }
+    // iCal入力
+    document.getElementById('icalUrlInput').value = userConfig.icalUrl;
+}
+
+// 設定保存ボタン
+document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+    const newClass = document.getElementById('settingClassSelect').value;
+    const newIcal = document.getElementById('icalUrlInput').value;
+
+    userConfig.classId = newClass;
+    userConfig.icalUrl = newIcal;
+
+    localStorage.setItem('userClassId', newClass);
+    localStorage.setItem('userIcalUrl', newIcal);
+
+    alert('設定を保存しました');
+    updateDashboardUI(); // 画面更新
+});
+
+function renderCalendar() {
+    const container = document.getElementById('calendarContent');
+    if(userConfig.icalUrl) {
+        // デモ用: 実際はGoogle Calendar Embed URLに変換するか、リンクを表示する
+        // ここでは簡易的にリンクボタンを表示
+        container.innerHTML = `
+            <div>
+                <i class="fa-solid fa-check-circle" style="color:#38B2AC; font-size:2rem; margin-bottom:10px;"></i>
+                <p>連携済み</p>
+                <a href="${userConfig.icalUrl}" target="_blank" style="color:#5B4DFF; display:block; margin-top:10px;">カレンダーを開く</a>
+            </div>
+        `;
+    } else {
+        container.innerHTML = `<p class="placeholder-text">設定画面でiCal URLを登録してください</p>`;
+    }
+}
+
+/* =========================================
+   Feature: ToDo List
+   ========================================= */
+function initTodos() {
+    renderTodoList();
+
+    document.getElementById('addTodoBtn').addEventListener('click', () => {
+        const input = document.getElementById('newTodoInput');
+        if(input.value.trim()) {
+            userConfig.todos.push({ text: input.value, done: false });
+            saveTodos();
+            input.value = '';
+        }
+    });
+}
+
+function renderTodoList() {
+    const list = document.getElementById('todoList');
+    list.innerHTML = '';
+    
+    let doneCount = 0;
+    userConfig.todos.forEach((todo, index) => {
+        if(todo.done) doneCount++;
+        const li = document.createElement('li');
+        li.className = todo.done ? 'done' : '';
+        li.innerHTML = `
+            <div style="display:flex; align-items:center; gap:10px;">
+                <input type="checkbox" ${todo.done ? 'checked' : ''}>
+                <span>${todo.text}</span>
+            </div>
+            <button class="delete-btn" style="border:none; background:none; color:#aaa; cursor:pointer;"><i class="fa-solid fa-trash"></i></button>
+        `;
+        
+        // チェックイベント
+        li.querySelector('input').addEventListener('change', () => {
+            userConfig.todos[index].done = !userConfig.todos[index].done;
+            saveTodos();
+        });
+        // 削除イベント
+        li.querySelector('.delete-btn').addEventListener('click', () => {
+            userConfig.todos.splice(index, 1);
+            saveTodos();
+        });
+
+        list.appendChild(li);
+    });
+
+    const total = userConfig.todos.length;
+    document.getElementById('todoCount').textContent = `${doneCount}/${total}`;
+    const percent = total > 0 ? (doneCount / total) * 100 : 0;
+    document.getElementById('todoProgress').style.width = `${percent}%`;
+}
+
+function saveTodos() {
+    localStorage.setItem('userTodos', JSON.stringify(userConfig.todos));
+    renderTodoList();
+}
+
+/* =========================================
+   Feature: Pomodoro
+   ========================================= */
+function initPomodoro() {
+    const display = document.getElementById('pomoTimer');
+    const btn = document.getElementById('pomoStartBtn');
+
+    const format = (s) => {
+        const m = Math.floor(s / 60).toString().padStart(2,'0');
+        const sc = (s % 60).toString().padStart(2,'0');
+        return `${m}:${sc}`;
+    };
+
+    btn.addEventListener('click', () => {
+        if(isPomoActive) {
+            // Stop
+            clearInterval(pomoTimerId);
+            isPomoActive = false;
+            btn.textContent = "開始";
         } else {
-            timerInterval = setInterval(() => {
-                if (timeLeft > 0) {
-                    timeLeft--;
-                    updatePomoDisplay();
+            // Start
+            isPomoActive = true;
+            btn.textContent = "一時停止";
+            pomoTimerId = setInterval(() => {
+                if(pomoTimeRemaining > 0) {
+                    pomoTimeRemaining--;
+                    display.textContent = format(pomoTimeRemaining);
                 } else {
-                    clearInterval(timerInterval);
-                    isRunning = false;
-                    startBtn.textContent = '開始';
-                    
-                    // モード切り替え
-                    isWorkMode = !isWorkMode;
-                    if (isWorkMode) {
-                        timeLeft = workDuration * 60;
-                        alert('休憩終了！作業に戻りましょう。');
-                    } else {
-                        timeLeft = breakDuration * 60;
-                        alert('作業終了！休憩しましょう。');
-                    }
-                    updatePomoDisplay();
-                    updateStatusText();
+                    clearInterval(pomoTimerId);
+                    alert("お疲れ様でした！休憩しましょう。");
+                    isPomoActive = false;
+                    btn.textContent = "開始";
+                    pomoTimeRemaining = 25 * 60;
                 }
             }, 1000);
-            startBtn.textContent = '停止';
         }
-        isRunning = !isRunning;
-    }
-
-    function resetTimer() {
-        clearInterval(timerInterval);
-        isRunning = false;
-        isWorkMode = true; 
-        timeLeft = workDuration * 60;
-        updatePomoDisplay();
-        updateStatusText();
-        startBtn.textContent = '開始';
-    }
-
-    // モーダル操作
-    settingsBtn.addEventListener('click', () => {
-        workInput.value = workDuration;
-        breakInput.value = breakDuration;
-        modal.classList.add('open');
     });
 
-    closeValBtn.addEventListener('click', () => {
-        modal.classList.remove('open');
+    document.getElementById('pomoResetBtn').addEventListener('click', () => {
+        clearInterval(pomoTimerId);
+        isPomoActive = false;
+        pomoTimeRemaining = 25 * 60;
+        display.textContent = "25:00";
+        btn.textContent = "開始";
     });
+}
 
-    window.addEventListener('click', (e) => {
-        if (e.target === modal) modal.classList.remove('open');
-    });
+/* =========================================
+   Feature: Admin Panel
+   ========================================= */
+function initDashboard() {} // 空定義（上のupdateUIで処理するため）
 
-    saveSettingsBtn.addEventListener('click', () => {
-        const newWork = parseInt(workInput.value);
-        const newBreak = parseInt(breakInput.value);
-
-        if (newWork > 0 && newBreak > 0) {
-            workDuration = newWork;
-            breakDuration = newBreak;
-            resetTimer(); // 設定反映のためリセット
-            modal.classList.remove('open');
+function initAdmin() {
+    // ログイン処理
+    document.getElementById('adminLoginBtn').addEventListener('click', () => {
+        const pass = document.getElementById('adminPasswordInput').value;
+        if(pass === '1234') {
+            document.getElementById('page-admin-login').classList.remove('active');
+            document.getElementById('page-admin-dashboard').classList.add('active');
+            renderAdminUI();
         } else {
-            alert("時間は1分以上に設定してください");
+            document.getElementById('loginError').style.display = 'block';
         }
     });
 
-    startBtn.addEventListener('click', toggleTimer);
-    resetBtn.addEventListener('click', resetTimer);
+    // タブ切り替え
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.target).classList.add('active');
+        });
+    });
+
+    // 変更監視（JSONダウンロード用）
+    document.getElementById('downloadJsonBtn').addEventListener('click', () => {
+        const jsonStr = JSON.stringify(adminData, null, 2);
+        const blob = new Blob([jsonStr], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "data.json";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // 各種エディタの初期化
+    const classSel = document.getElementById('adminClassSelect');
+    // 21HR-28HR
+    for(let i=21; i<=28; i++) {
+        const opt = document.createElement('option');
+        opt.value = `${i}HR`;
+        opt.textContent = `${i}HR`;
+        classSel.appendChild(opt);
+    }
+    classSel.addEventListener('change', renderScheduleEditor);
+    document.getElementById('adminDaySelect').addEventListener('change', renderScheduleEditor);
+
+    // テスト追加
+    document.getElementById('addTestBtn').addEventListener('click', () => {
+        const name = document.getElementById('newTestName').value;
+        const date = document.getElementById('newTestDate').value;
+        if(name && date) {
+            adminData.tests.push({name, date});
+            renderTestList();
+            document.getElementById('newTestName').value = '';
+        }
+    });
+}
+
+function renderAdminUI() {
+    renderTimingsEditor();
+    renderScheduleEditor();
+    renderTestList();
+}
+
+function renderTimingsEditor() {
+    const container = document.getElementById('timingsEditor');
+    container.innerHTML = '';
+    adminData.timeSettings.forEach((ts, idx) => {
+        const div = document.createElement('div');
+        div.className = 'schedule-row';
+        div.innerHTML = `
+            <label>${idx+1}限</label>
+            <input type="time" class="input-field" value="${ts.start}" onchange="updateTiming(${idx}, 'start', this.value)">
+            <span>~</span>
+            <input type="time" class="input-field" value="${ts.end}" onchange="updateTiming(${idx}, 'end', this.value)">
+        `;
+        container.appendChild(div);
+    });
+}
+// グローバルスコープに露出させてHTMLのonchangeから呼べるようにする
+window.updateTiming = (idx, key, val) => {
+    adminData.timeSettings[idx][key] = val;
+};
+
+function renderScheduleEditor() {
+    const container = document.getElementById('scheduleEditor');
+    container.innerHTML = '';
     
-    // 初期表示
-    updatePomoDisplay();
-    updateStatusText();
+    const cls = document.getElementById('adminClassSelect').value || '21HR';
+    const day = document.getElementById('adminDaySelect').value || 'Mon';
 
+    if(!adminData.timetables[cls]) adminData.timetables[cls] = {};
+    if(!adminData.timetables[cls][day]) adminData.timetables[cls][day] = {};
 
-    /* === 6. テストカウントダウン === */
-    function updateTestCountdown() {
-        const container = document.getElementById('testContainer');
-        const nameEl = document.getElementById('targetTestName');
-        const daysEl = document.getElementById('cdDays');
-
-        // 直近のテストを探す
-        const now = new Date();
-        const upcomingTests = appData.tests
-            .map(t => ({ name: t.name, date: new Date(t.date) }))
-            .filter(t => t.date >= now)
-            .sort((a, b) => a.date - b.date);
-
-        if (upcomingTests.length > 0) {
-            const nextTest = upcomingTests[0];
-            nameEl.textContent = nextTest.name;
-            const diffTime = nextTest.date - now;
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            daysEl.textContent = diffDays;
-        } else {
-            nameEl.textContent = "予定なし";
-            daysEl.textContent = "-";
-        }
+    for(let i=1; i<=7; i++) {
+        const div = document.createElement('div');
+        div.className = 'schedule-row';
+        const val = adminData.timetables[cls][day][i] || "";
+        div.innerHTML = `
+            <label>${i}限</label>
+            <input type="text" class="input-field" value="${val}" placeholder="科目名" 
+             oninput="updateSchedule('${cls}', '${day}', ${i}, this.value)">
+        `;
+        container.appendChild(div);
     }
+}
+window.updateSchedule = (cls, day, period, val) => {
+    adminData.timetables[cls][day][period] = val;
+};
 
-
-    /* === 画面遷移 === */
-    const pages = {
-        home: document.getElementById('page-home'),
-        settings: document.getElementById('page-settings'),
-        adminLogin: document.getElementById('page-admin-login'),
-        adminDash: document.getElementById('page-admin-dashboard')
-    };
-
-    function showPage(pageId) {
-        Object.values(pages).forEach(p => p.classList.remove('active'));
-        pages[pageId].classList.add('active');
-    }
-
-    function setupEventListeners() {
-        document.getElementById('btnHome').addEventListener('click', () => {
-            showPage('home');
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('btnHome').classList.add('active');
-        });
-
-        document.getElementById('btnSettings').addEventListener('click', () => {
-            showPage('settings');
-            // クラス選択肢の生成（簡易）
-            const select = document.getElementById('settingClassSelect');
-            select.innerHTML = '';
-            Object.keys(appData.schedule).forEach(cls => {
-                const opt = document.createElement('option');
-                opt.value = cls;
-                opt.textContent = cls;
-                if(cls === userSettings.classId) opt.selected = true;
-                select.appendChild(opt);
-            });
-            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('btnSettings').classList.add('active');
-        });
-
-        document.getElementById('saveSettingsBtn').addEventListener('click', () => {
-            userSettings.classId = document.getElementById('settingClassSelect').value;
-            userSettings.icalUrl = document.getElementById('icalUrlInput').value;
-            localStorage.setItem('userSettings', JSON.stringify(userSettings));
-            alert('設定を保存しました');
-            location.reload();
-        });
-
-        document.getElementById('btnAdmin').addEventListener('click', () => {
-            showPage('adminLogin');
-        });
-
-        document.getElementById('adminLoginBtn').addEventListener('click', () => {
-            const pass = document.getElementById('adminPasswordInput').value;
-            if (pass === '1234') {
-                showPage('adminDash');
-                document.getElementById('adminPasswordInput').value = '';
-                document.getElementById('loginError').style.display = 'none';
-            } else {
-                document.getElementById('loginError').style.display = 'block';
-            }
-        });
-
-        document.getElementById('adminBackBtn').addEventListener('click', () => {
-            showPage('home');
-        });
-    }
-
-    /* === 管理者機能 (簡易) === */
-    function initAdmin() {
-        // タブ切り替え
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-                btn.classList.add('active');
-                document.getElementById(btn.dataset.target).classList.add('active');
-            });
-        });
-
-        // JSONダウンロード
-        document.getElementById('downloadJsonBtn').addEventListener('click', () => {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appData, null, 2));
-            const downloadAnchorNode = document.createElement('a');
-            downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", "data.json");
-            document.body.appendChild(downloadAnchorNode);
-            downloadAnchorNode.click();
-            downloadAnchorNode.remove();
-        });
-    }
-
-});
+function renderTestList() {
+    const list = document.getElementById('adminTestList');
+    list.innerHTML = '';
+    adminData.tests.forEach((t, idx) => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+            <span>${t.name} (${t.date})</span>
+            <button onclick="deleteTest(${idx})" style="color:red; background:none; border:none; cursor:pointer;">削除</button>
+        `;
+        list.appendChild(li);
+    });
+}
+window.deleteTest = (idx) => {
+    adminData.tests.splice(idx, 1);
+    renderTestList();
+};
