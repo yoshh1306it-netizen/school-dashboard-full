@@ -1,6 +1,6 @@
 /* ベース設定 */
 :root {
-    --bg-body: #F3F6FD; /* 明るいグレー青 */
+    --bg-body: #F3F6FD;
     --bg-card: #FFFFFF;
     --text-main: #2D3748;
     --text-sub: #718096;
@@ -77,7 +77,7 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 
 /* === 個別カードスタイル === */
 
-/* 1. 現在時刻（グラデーション） */
+/* 1. 現在時刻 */
 .time-card {
     grid-column: span 12;
     background: linear-gradient(135deg, #5B4DFF 0%, #8F94FB 100%);
@@ -110,7 +110,7 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
     padding-left: 10px; padding-right: 10px; border-radius: 8px; border-bottom: none; font-weight: bold;
 }
 
-/* 4. ToDoリスト (拡大: span 4 -> span 6) */
+/* 4. ToDoリスト (拡大: span 6) */
 .todo-card { grid-column: span 12; }
 @media (min-width: 768px) { .todo-card { grid-column: span 6; } }
 .todo-input-group { display: flex; gap: 5px; margin-bottom: 10px; }
@@ -120,14 +120,21 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 .todo-list-items li { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
 .todo-list-items li.done span { text-decoration: line-through; color: var(--text-sub); }
 
-/* 5. ポモドーロ */
+/* 5. ポモドーロ (span 4) */
 .pomodoro-card { grid-column: span 12; text-align: center; }
 @media (min-width: 768px) { .pomodoro-card { grid-column: span 4; } }
 .timer-display { font-size: 3rem; font-weight: bold; color: var(--text-red); margin: 10px 0; }
 .pomo-controls { display: flex; justify-content: center; gap: 10px; margin-top: 15px; }
 .btn-icon { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: white; cursor: pointer; }
 
-/* 6. テストカウントダウン (縮小: span 6 -> span 4) */
+/* ポモドーロ設定アイコン */
+.settings-icon-btn {
+    margin-left: auto; background: none; border: none;
+    color: var(--text-sub); cursor: pointer; font-size: 1.1rem; transition: 0.2s;
+}
+.settings-icon-btn:hover { color: var(--text-main); transform: rotate(45deg); }
+
+/* 6. テストカウントダウン (縮小: span 4) */
 .test-card { grid-column: span 12; background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%); color: white; border: none; }
 @media (min-width: 768px) { .test-card { grid-column: span 4; } }
 .test-card .icon-bg { background: rgba(255,255,255,0.2); color: white; }
@@ -170,9 +177,29 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 .save-area { margin-top: 40px; text-align: center; }
 .note { font-size: 0.8rem; color: var(--text-sub); margin-top: 10px; }
 
-/* モバイル対応微調整 */
+/* モーダルウィンドウ */
+.modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.5); z-index: 1000;
+    justify-content: center; align-items: center; animation: fadeIn 0.2s ease;
+}
+.modal-overlay.open { display: flex; }
+
+.modal-box {
+    background: white; width: 90%; max-width: 400px;
+    border-radius: 12px; padding: 24px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.modal-header h3 { font-size: 1.1rem; font-weight: bold; }
+.close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-sub); }
+.modal-body .form-group { margin-bottom: 15px; }
+.modal-body label { font-size: 0.9rem; font-weight: bold; display: block; margin-bottom: 5px; }
+.modal-body input { font-size: 1rem; padding: 10px; width: 100%; border: 1px solid var(--border); border-radius: 6px; }
+
+/* モバイル対応 */
 @media (max-width: 768px) {
     .dashboard-grid { display: flex; flex-direction: column; }
     .top-nav { padding: 1rem; }
-    .brand-text { display: none; } /* スマホではロゴのみなど簡略化 */
+    .brand-text { display: none; }
 }
